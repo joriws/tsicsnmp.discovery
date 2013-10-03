@@ -1,0 +1,296 @@
+#!/usr/bin/perl
+
+use strict;
+
+=pod
+script: tsicsnmp.discovery
+Turbo-simple-commanded SNMP Discovery for Zabbix v2->
+version: 1.0
+idea and original author of advsnmp.discovery: Simon Kowallik <sk simonkowallik.com>
+author: Jori Hamalainen <jori.hamalainen teliasonera.com>
+description: Zabbix low level SNMP discovery script for advanced analysis and index discovery
+license: GPL2
+
+Analyzing commands implemented
+   a			= [len].[char]*len
+   e			= oid => end-of-oid, does not set POSTOID
+   t			= [32 < char < 127]*
+   [number]	= [digit]*number
+   
+See printusage for commandline usage
+
+Example
+./tsicsnmp.discovery 127.0.0.1 "-v2c -cpublic" .1.3.6.1.4.1.9.9.336.1.6.1.1.3 a 1 t e
+
+Analyzes OID index 16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0
+INDEX1 "a" =       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+INDEX2 "1" =                                                          11
+INDEX3 "t" =                                                             tttttttttttttttttttttttttttttttttttttttt
+INDEX4 "e" =                                                                                                      e
+
+Output
+   "{#TSICSNMPOID}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+   "{#TSICSNMPFULLOID}": ".1.3.6.1.4.1.9.9.336.1.6.1.1.3.16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+   "{#TSICSNMPPOSTOID}": "",
+   "{#TSICSNMPPOSTOIDTEXT}": "",
+   "{#TSICSNMPVALUE}": "1",
+   "{#TSICSNMPINDEX1}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76",
+   "{#TSICSNMPINDEXTEXT1}": "NI-INTERNATIONAL",
+   "{#TSICSNMPINDEX2}": "12",
+   "{#TSICSNMPINDEXTEXT2}": "12",
+   "{#TSICSNMPINDEX3}": "86.105.114.116.117.97.108.76.83.48.45.51",
+   "{#TSICSNMPINDEXTEXT3}": "VirtualLS0-3",
+   "{#TSICSNMPINDEX4}": "0",
+   "{#TSICSNMPINDEXTEXT4}": "",
+   
+If final "e" command is left out then output of it would be at POSTOID.
+Command "1" and "t" is very similar to "a" but instead of copying [len] bytes it copies all printable characters
+
+Running in Zabbix low level discovery
+- place script to zabbix external script directory with run time rights for zabbix user
+- apply global, template, host group or host macro $SNMP_COMMUNITY
+   key: tsicsnmp.discovery[{HOST.IP},"-v2c -c{$SNMP_COMMUNITY}",.1.3.6.1.4.1.9.9.336.1.6.1.1.3,a,1,t,e]
+- insert regexp to low level discovery if you want to limit answers
+- insert macros to item -entries
+   macro: {#TSICSNMPINDEXTEXT2}
+   item name: Link {#TSICSNMPINDEXTEXT1} to {#TSICSNMPINDEXTEXT3} SLC {#TSICSNMPINDEX4}
+=cut
+
+# global options
+my $global_snmpwalk_options = "-OQn";
+my $SNMPWALK = "/usr/bin/snmpwalk";
+
+# check amount of command line parameters
+if (scalar(@ARGV) < 4) {
+   printusage();
+}
+
+# Capture command line parameters
+my $CMDHOST = $ARGV[0];
+my $CMDSNMPWALK = $ARGV[1];
+my $CMDOID = $ARGV[2];
+
+# check parameters
+if ($CMDHOST eq '' || $CMDSNMPWALK eq '' || $CMDOID eq '') {
+   printusage();
+}
+
+# build config
+my @CMD_ARRAY;
+my %INDEXES;
+
+# generate command list array from reset of the command line parameters
+for (my $cnt = 3; $cnt < scalar(@ARGV); $cnt++) {
+   push @CMD_ARRAY,$ARGV[$cnt];
+}
+
+# clean CMDOID trailing dot if present
+$CMDOID =~ s/\.$//o;
+
+# make a copy of command line OID for playing around
+my $oidprefix = $CMDOID;
+
+# add prefix dot if missing
+$oidprefix =~ s/^([^.])/\.$1/o;
+
+# create snmpwalk_oid from modified oidprefix
+my $snmpwalk_oid = $oidprefix;
+
+# escape all dots in opt_oid_escape for future regexes
+$oidprefix =~ s/\./\\./g;
+
+foreach my $snmpwalk_line (`$SNMPWALK $global_snmpwalk_options $CMDSNMPWALK $CMDHOST $snmpwalk_oid`) {
+   # remove newline
+   chomp($snmpwalk_line);
+   
+   # split OID = VALUE
+   my ($oid, $value) = split(/ = /, $snmpwalk_line, 2);
+   
+   # sanitize $value, remove start/end quotes
+   $value =~ s/^"//o;
+   $value =~ s/"$//o;
+   $value =~ s/"/\\"/go;
+   $value =~ s/\\/\\\\/go;
+
+   # remove OPT_OID part from $oid and we will get the trailing OID part, where we will extract the INDEX
+   $oid =~ s/^$oidprefix[.]?//o;
+
+   # Create analyzed array
+   my @ANA_ARRAY;
+
+   # split rest of oid into array
+   my @oid_arr = split(/\./, $oid);
+
+   # index of @oid_arr
+   my $oid_index=0;
+    
+   # run through command line commands
+   for (my $t=0; $t < scalar(@CMD_ARRAY); $t++) {
+      my $cmd=$CMD_ARRAY[$t];
+      my $analyzed_oid='';
+      
+      # consume OID based on "instructions"
+      if ($cmd eq 'a') { # ascii slurp, 1st byte amount of OID bytes interpreted as ASCII
+         my $asciilen = shift @oid_arr;
+         $analyzed_oid=$asciilen;
+         for (my $oi=0; $oi < $asciilen; $oi++) { # run throught ASCII
+            $analyzed_oid .= '.' . shift @oid_arr;
+         }
+      } elsif ($cmd eq 't') { # analyze as text
+         my @comb;
+         foreach my $chr (@oid_arr) { # run oids until stopped
+            if ($chr > 31 && $chr < 127) { # printable character
+               push @comb, $chr;
+            } else {
+               last; # quit foreach
+            }
+         }
+         # generate index
+         $analyzed_oid = join('.', @comb);
+         # remove oid bytes based on analyzed size at @comb
+         for (1 .. scalar(@comb)) {
+            shift @oid_arr;
+         }
+      } elsif ($cmd eq 'e') { # end of oid -slurp
+         $analyzed_oid = join('.', @oid_arr);
+         undef @oid_arr;
+      } elsif ($cmd =~ /\d+/o) { # count exact numbers
+         # create array comb and store OID bytes there for easy join
+         my @comb;
+         for (my $oi=0; $oi < $cmd; $oi++) {
+            push @comb,shift @oid_arr if $oid_arr[0] ne "";
+         }
+         $analyzed_oid = join('.', @comb);
+      } else { # unknown command - first level of command code analysis
+         die "Cannot evaluated command line command \"$cmd\" at command line offset $t\n";
+      }
+      push @ANA_ARRAY,$analyzed_oid;
+   }
+   # Store analyzed array
+   $INDEXES{$oid}{a}=\@ANA_ARRAY;
+   $INDEXES{$oid}{v}=$value;
+   # Check if OID is left and store that as well
+   $INDEXES{$oid}{e}=join('.', @oid_arr);
+}
+
+#
+# print JSON object
+#
+print "{\n";
+print "\t\"data\":[\n";
+
+my $firstobj = 1;
+foreach my $analyzed_oid (sort keys %INDEXES) {
+   # print JSON object separator if not first object
+   $firstobj!=0?$firstobj=0:print ",\n";
+   
+   # Open new JSON Object
+   print "\t\t{\n";
+   
+   # Print static data as JSON
+   print "\t\t\t\"{#TSICSNMPOID}\": \"$analyzed_oid\",\n";
+   print "\t\t\t\"{#TSICSNMPFULLOID}\": \"$CMDOID.$analyzed_oid\",\n";
+   print "\t\t\t\"{#TSICSNMPPOSTOID}\": \"$INDEXES{$analyzed_oid}{e}\",\n";
+   print "\t\t\t\"{#TSICSNMPPOSTOIDTEXT}\": \"". asciioid($INDEXES{$analyzed_oid}{e},1)  ."\",\n";
+   print "\t\t\t\"{#TSICSNMPVALUE}\": \"$INDEXES{$analyzed_oid}{v}\",\n";
+   
+   # print OIDS in command order, initilize counter to 1 for this master oid
+   my $ctr=1;
+   foreach my $aoid (@{$INDEXES{$analyzed_oid}{a}}) { # go through command analyzed array
+      print "\t\t\t\"{#TSICSNMPINDEX$ctr}\": \"$aoid\",\n";
+      # check command code via index and determine ascii printing mode according to result
+      print "\t\t\t\"{#TSICSNMPINDEXTEXT$ctr}\": \"". asciioid($aoid, $CMD_ARRAY[$ctr-1] eq 'a'?0:1) ."\",\n";
+      
+      # increase counter
+      $ctr++;
+   }
+   # close JSON object
+   print "\t\t}";
+}
+
+# close JSON file
+print "\n\t]\n";
+print "}\n";
+
+exit(0);
+#########################################
+
+sub asciioid($$) {
+   my $oid=shift;
+   my $mode=shift; # mode=1 prints non-printable as digits, mode=0 only printable
+
+   # ASCII dump of printable characters
+   my $temptmp='';
+   foreach my $c (split(/\./, $oid)) {
+      if ($c > 31 && $c < 127) {
+         $temptmp .= chr($c);
+      } else {
+         $temptmp .= "." . int($c) . "." if $mode==1;
+      }
+   }
+   # clean generated ASCII text
+   $temptmp =~ s/"/\\"/go;
+   $temptmp =~ s/^[.]?(.*?)[.]?$/$1/o;
+ 
+   return $temptmp;
+}
+
+sub printusage {
+   print "Turbo-simple-commanded SNMP Discovery for Zabbix v2->\n\n";
+   print "Usage: $0 [host] [SNMP options] [base oid] [analyze commands]*\n";
+   print "\thost = host dns or ip\n";
+   print "\tSNMP options = snmpwalk commandline options ie \"-v2c -cpublic\"\n";
+   print "\tbase oid = SNMP oid to be queried and analyzed\n";
+   print "\tanalyze commands = commands to splice OID\n";
+   print "\t\ta = ASCII analyze, 1st byte string lenght and read string\n";
+   print "\t\te = return to end of oid\n";
+   print "\t\tt = analyze as ASCII text until first non-printable character, \"1 t\" is quite close to \"a\"\n";
+   print "\t\t[number] = copy [number] OID digits\n";
+   print "\t\t\tPrevious advanced snmp discovery script had functionality like this\n";
+   print "\nReturn value via STDOUT is JSON array of objects\n";
+   print "\t{#TSICSNMPOID} = all OID index which are analyzed by commands\n";
+   print "\t{#TSICSNMPFULLOID} = full OID containing full address of MIB object\n";
+   print "\t{#TSICSNMPPOSTOID} = contains left over OID if anything is left over from analyzing commands\n";
+   print "\t{#TSICSNMPPOSTOIDTEXT} = above as 7-bit printable characters converted to text\n";
+   print "\t{#TSICSNMPVALUE} = SNMP value returned by full OID query\n";
+   print "\t{#TSICSNMPINDEX[1-]}* = Indexes analyzed by commands, starts from 1 and ends at number of analyzing commands\n";
+   print "\t{#TSICSNMPINDEXTEXT[1-]}* = Above analyzed converted to 7-bit printable characters\n";
+   exit(0);
+}
+
+=pod
+More running and output examples
+
+./tsicsnmp.discovery 127.0.0.1 "-v2c -cpublic" .1.3.6.1.4.1.9.9.336.1.6.1.1.3 1
+"{#TSICSNMPOID}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPFULLOID}": ".1.3.6.1.4.1.9.9.336.1.6.1.1.3.16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPPOSTOID}": "78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPPOSTOIDTEXT}": "NI-INTERNATIONAL.12.VirtualLS0-3.0",
+"{#TSICSNMPVALUE}": "1",
+"{#TSICSNMPINDEX1}": "16",
+"{#TSICSNMPINDEXTEXT1}": "16",
+
+This the command which should be run according to example MIB, 2x ASCII analyses and what is left take it from overflow                                                                                                                                                                        
+./tsicsnmp.discovery 127.0.0.1 "-v2c -cpublic" .1.3.6.1.4.1.9.9.336.1.6.1.1.3 a a
+"{#TSICSNMPOID}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPFULLOID}": ".1.3.6.1.4.1.9.9.336.1.6.1.1.3.16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPPOSTOID}": "0",
+"{#TSICSNMPPOSTOIDTEXT}": "0",
+"{#TSICSNMPVALUE}": "1",
+"{#TSICSNMPINDEX1}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76",
+"{#TSICSNMPINDEXTEXT1}": "NI-INTERNATIONAL",
+"{#TSICSNMPINDEX2}": "12.86.105.114.116.117.97.108.76.83.48.45.51",
+"{#TSICSNMPINDEXTEXT2}": "VirtualLS0-3",
+
+Simplest form of running (note, you need to add at least one command, use "e" to tell that you want everything to INDEX1
+./tsicsnmp.discovery 127.0.0.1 "-v2c -cpublic" .1.3.6.1.4.1.9.9.336.1.6.1.1.3 e
+"{#TSICSNMPOID}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPFULLOID}": ".1.3.6.1.4.1.9.9.336.1.6.1.1.3.16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPPOSTOID}": "",
+"{#TSICSNMPPOSTOIDTEXT}": "",
+"{#TSICSNMPVALUE}": "1",
+"{#TSICSNMPINDEX1}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPINDEXTEXT1}": "16.NI-INTERNATIONAL.12.VirtualLS0-3.0",
+
+=cut
+
