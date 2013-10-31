@@ -15,6 +15,7 @@ Analyzing commands implemented
    a			= [len].[char]*len
    e			= oid => end-of-oid, does not set POSTOID
    t			= [32 < char < 127]*
+   i                    = ip-address, 4 digits with dots, similar to command line "4"
    [number]	= [digit]*number
    
 See printusage for commandline usage
@@ -161,6 +162,12 @@ foreach my $snmpwalk_line (`$SNMPWALK $global_snmpwalk_options $CMDSNMPWALK $CMD
             push @comb,shift @oid_arr if $oid_arr[0] ne "";
          }
          $analyzed_oid = join('.', @comb);
+      } elsif ($cmd eq 'i') { # analyze IP-address which is like "count=4"
+         my @comb;
+         for (0..3) {
+            push @comb, shift @oid_arr;
+         }
+         $analyzed_oid = join('.', @comb);
       } else { # unknown command - first level of command code analysis
          die "Cannot evaluated command line command \"$cmd\" at command line offset $t\n";
       }
@@ -225,7 +232,7 @@ sub asciioid($$) {
       if ($c > 31 && $c < 127) {
          $temptmp .= chr($c);
       } else {
-         $temptmp .= "." . int($c) . "." if $mode==1;
+         $temptmp .= "." . int($c) if $mode==1;
       }
    }
    # clean generated ASCII text
