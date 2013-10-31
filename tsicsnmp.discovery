@@ -13,10 +13,11 @@ license: GPL2
 
 Analyzing commands implemented
    a			= [len].[char]*len
-   e			= oid => end-of-oid, does not set POSTOID
+   e			= oid => end-of-oid, does not set OIDNOTCAPTURED
    t			= [32 < char < 127]*
-   i                    = ip-address, 4 digits with dots, similar to command line "4"
+   i			= ip-address, 4 digits with dots, similar to command line "4"
    [number]	= [digit]*number
+   -[number]	= [digit]*number indexed from right/end
    
 See printusage for commandline usage
 
@@ -32,8 +33,8 @@ INDEX4 "e" =                                                                    
 Output
    "{#TSICSNMPOID}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
    "{#TSICSNMPFULLOID}": ".1.3.6.1.4.1.9.9.336.1.6.1.1.3.16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
-   "{#TSICSNMPPOSTOID}": "",
-   "{#TSICSNMPPOSTOIDTEXT}": "",
+   "{#TSICSNMPOIDNOTCAPTURED}": "",
+   "{#TSICSNMPOIDNOTCAPTUREDTEXT}": "",
    "{#TSICSNMPVALUE}": "1",
    "{#TSICSNMPINDEX1}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76",
    "{#TSICSNMPINDEXTEXT1}": "NI-INTERNATIONAL",
@@ -44,7 +45,7 @@ Output
    "{#TSICSNMPINDEX4}": "0",
    "{#TSICSNMPINDEXTEXT4}": "",
    
-If final "e" command is left out then output of it would be at POSTOID.
+If final "e" command is left out then output of it would be at OIDNOTCAPTURED.
 Command "1" and "t" is very similar to "a" but instead of copying [len] bytes it copies all printable characters
 
 Running in Zabbix low level discovery
@@ -155,11 +156,19 @@ foreach my $snmpwalk_line (`$SNMPWALK $global_snmpwalk_options $CMDSNMPWALK $CMD
       } elsif ($cmd eq 'e') { # end of oid -slurp
          $analyzed_oid = join('.', @oid_arr);
          undef @oid_arr;
-      } elsif ($cmd =~ /\d+/o) { # count exact numbers
+      } elsif ($cmd =~ /^\d+/o) { # count exact numbers
          # create array comb and store OID bytes there for easy join
          my @comb;
          for (my $oi=0; $oi < $cmd; $oi++) {
             push @comb,shift @oid_arr if $oid_arr[0] ne "";
+         }
+         $analyzed_oid = join('.', @comb);
+      } elsif ($cmd =~ /^\-\d+/o) { # count exact numbers
+         # create array comb and store OID bytes there for easy join
+         my @comb;
+         print STDERR "Negative match $cmd\n";
+         for (my $oi=0; $oi < abs($cmd); $oi++) {
+            unshift @comb,pop @oid_arr if $oid_arr[0] ne "";
          }
          $analyzed_oid = join('.', @comb);
       } elsif ($cmd eq 'i') { # analyze IP-address which is like "count=4"
@@ -197,8 +206,8 @@ foreach my $analyzed_oid (sort keys %INDEXES) {
    # Print static data as JSON
    print "\t\t\t\"{#TSICSNMPOID}\": \"$analyzed_oid\",\n";
    print "\t\t\t\"{#TSICSNMPFULLOID}\": \"$CMDOID.$analyzed_oid\",\n";
-   print "\t\t\t\"{#TSICSNMPPOSTOID}\": \"$INDEXES{$analyzed_oid}{e}\",\n";
-   print "\t\t\t\"{#TSICSNMPPOSTOIDTEXT}\": \"". asciioid($INDEXES{$analyzed_oid}{e},1)  ."\",\n";
+   print "\t\t\t\"{#TSICSNMPOIDNOTCAPTURED}\": \"$INDEXES{$analyzed_oid}{e}\",\n";
+   print "\t\t\t\"{#TSICSNMPOIDNOTCAPTUREDTEXT}\": \"". asciioid($INDEXES{$analyzed_oid}{e},1)  ."\",\n";
    print "\t\t\t\"{#TSICSNMPVALUE}\": \"$INDEXES{$analyzed_oid}{v}\",\n";
    
    # print OIDS in command order, initilize counter to 1 for this master oid
@@ -258,8 +267,8 @@ sub printusage {
    print "\nReturn value via STDOUT is JSON array of objects\n";
    print "\t{#TSICSNMPOID} = all OID index which are analyzed by commands\n";
    print "\t{#TSICSNMPFULLOID} = full OID containing full address of MIB object\n";
-   print "\t{#TSICSNMPPOSTOID} = contains left over OID if anything is left over from analyzing commands\n";
-   print "\t{#TSICSNMPPOSTOIDTEXT} = above as 7-bit printable characters converted to text\n";
+   print "\t{#TSICSNMPOIDNOTCAPTURED} = contains left over OID if anything is left over from analyzing commands\n";
+   print "\t{#TSICSNMPOIDNOTCAPTUREDTEXT} = above as 7-bit printable characters converted to text\n";
    print "\t{#TSICSNMPVALUE} = SNMP value returned by full OID query\n";
    print "\t{#TSICSNMPINDEX[1-]}* = Indexes analyzed by commands, starts from 1 and ends at number of analyzing commands\n";
    print "\t{#TSICSNMPINDEXTEXT[1-]}* = Above analyzed converted to 7-bit printable characters\n";
@@ -272,8 +281,8 @@ More running and output examples
 ./tsicsnmp.discovery 127.0.0.1 "-v2c -cpublic" .1.3.6.1.4.1.9.9.336.1.6.1.1.3 1
 "{#TSICSNMPOID}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
 "{#TSICSNMPFULLOID}": ".1.3.6.1.4.1.9.9.336.1.6.1.1.3.16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
-"{#TSICSNMPPOSTOID}": "78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
-"{#TSICSNMPPOSTOIDTEXT}": "NI-INTERNATIONAL.12.VirtualLS0-3.0",
+"{#TSICSNMPOIDNOTCAPTURED}": "78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
+"{#TSICSNMPOIDNOTCAPTUREDTEXT}": "NI-INTERNATIONAL.12.VirtualLS0-3.0",
 "{#TSICSNMPVALUE}": "1",
 "{#TSICSNMPINDEX1}": "16",
 "{#TSICSNMPINDEXTEXT1}": "16",
@@ -282,8 +291,8 @@ This the command which should be run according to example MIB, 2x ASCII analyses
 ./tsicsnmp.discovery 127.0.0.1 "-v2c -cpublic" .1.3.6.1.4.1.9.9.336.1.6.1.1.3 a a
 "{#TSICSNMPOID}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
 "{#TSICSNMPFULLOID}": ".1.3.6.1.4.1.9.9.336.1.6.1.1.3.16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
-"{#TSICSNMPPOSTOID}": "0",
-"{#TSICSNMPPOSTOIDTEXT}": "0",
+"{#TSICSNMPOIDNOTCAPTURED}": "0",
+"{#TSICSNMPOIDNOTCAPTUREDTEXT}": "0",
 "{#TSICSNMPVALUE}": "1",
 "{#TSICSNMPINDEX1}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76",
 "{#TSICSNMPINDEXTEXT1}": "NI-INTERNATIONAL",
@@ -294,8 +303,8 @@ Simplest form of running (note, you need to add at least one command, use "e" to
 ./tsicsnmp.discovery 127.0.0.1 "-v2c -cpublic" .1.3.6.1.4.1.9.9.336.1.6.1.1.3 e
 "{#TSICSNMPOID}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
 "{#TSICSNMPFULLOID}": ".1.3.6.1.4.1.9.9.336.1.6.1.1.3.16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
-"{#TSICSNMPPOSTOID}": "",
-"{#TSICSNMPPOSTOIDTEXT}": "",
+"{#TSICSNMPOIDNOTCAPTURED}": "",
+"{#TSICSNMPOIDNOTCAPTUREDTEXT}": "",
 "{#TSICSNMPVALUE}": "1",
 "{#TSICSNMPINDEX1}": "16.78.73.45.73.78.84.69.82.78.65.84.73.79.78.65.76.12.86.105.114.116.117.97.108.76.83.48.45.51.0",
 "{#TSICSNMPINDEXTEXT1}": "16.NI-INTERNATIONAL.12.VirtualLS0-3.0",
