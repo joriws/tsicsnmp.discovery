@@ -251,6 +251,7 @@ sub printusage {
    print "\tanalyze commands = commands to splice OID\n";
    print "\t\ta = ASCII analyze, 1st byte string lenght and read string\n";
    print "\t\te = return to end of oid\n";
+   print "\t\ti = analyze IP address, alias for 4 digit matching, does not have sanity check\n";
    print "\t\tt = analyze as ASCII text until first non-printable character, \"1 t\" is quite close to \"a\"\n";
    print "\t\t[number] = copy [number] OID digits\n";
    print "\t\t\tPrevious advanced snmp discovery script had functionality like this\n";
