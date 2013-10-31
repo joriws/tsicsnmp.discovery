@@ -17,7 +17,7 @@ Analyzing commands implemented
    t			= [32 < char < 127]*
    i			= ip-address, 4 digits with dots, similar to command line "4"
    [number]	= [digit]*number
-   -[number]	= [digit]*number indexed from right/end
+   -[option]	= negate command parameter to OID analyze from right, does only work for "t", "i" and "[number]" commands
    
 See printusage for commandline usage
 
@@ -153,6 +153,21 @@ foreach my $snmpwalk_line (`$SNMPWALK $global_snmpwalk_options $CMDSNMPWALK $CMD
          for (1 .. scalar(@comb)) {
             shift @oid_arr;
          }
+      } elsif ($cmd eq '-t') { # analyze as text from right
+         my @comb;
+         foreach my $chr (reverse @oid_arr) { # run oids from right until stopped
+            if ($chr > 31 && $chr < 127) { # printable character
+               unshift @comb, $chr;
+            } else {
+               last; # quit foreach
+            }
+         }
+         # generate index
+         $analyzed_oid = join('.', @comb);
+         # remove oid bytes based on analyzed size at @comb
+         for (1 .. scalar(@comb)) {
+            pop @oid_arr;
+         }
       } elsif ($cmd eq 'e') { # end of oid -slurp
          $analyzed_oid = join('.', @oid_arr);
          undef @oid_arr;
@@ -163,7 +178,7 @@ foreach my $snmpwalk_line (`$SNMPWALK $global_snmpwalk_options $CMDSNMPWALK $CMD
             push @comb,shift @oid_arr if $oid_arr[0] ne "";
          }
          $analyzed_oid = join('.', @comb);
-      } elsif ($cmd =~ /^\-\d+/o) { # count exact numbers
+      } elsif ($cmd =~ /^\-\d+/o) { # count exact numbers from right
          # create array comb and store OID bytes there for easy join
          my @comb;
          print STDERR "Negative match $cmd\n";
@@ -175,6 +190,12 @@ foreach my $snmpwalk_line (`$SNMPWALK $global_snmpwalk_options $CMDSNMPWALK $CMD
          my @comb;
          for (0..3) {
             push @comb, shift @oid_arr;
+         }
+         $analyzed_oid = join('.', @comb);
+      } elsif ($cmd eq '-i') { # analyze IP-address which is like "count=4" from right
+         my @comb;
+         for (0..3) {
+            unshift @comb, pop @oid_arr;
          }
          $analyzed_oid = join('.', @comb);
       } else { # unknown command - first level of command code analysis
@@ -235,15 +256,26 @@ sub asciioid($$) {
    my $oid=shift;
    my $mode=shift; # mode=1 prints non-printable as digits, mode=0 only printable
 
+   #print STDERR "ASCIIOID: $oid $mode\n";
+
    # ASCII dump of printable characters
    my $temptmp='';
+   my @comb;
    foreach my $c (split(/\./, $oid)) {
       if ($c > 31 && $c < 127) {
          $temptmp .= chr($c);
       } else {
-         $temptmp .= "." . int($c) if $mode==1;
+         push @comb, $temptmp if $temptmp ne '';
+         push @comb, int($c) if $mode==1;
+         $temptmp = '';
       }
    }
+
+   # Final push if something is not pushed already
+   push @comb, $temptmp if $temptmp ne '';
+   
+   $temptmp = join(".", @comb);
+   
    # clean generated ASCII text
    $temptmp =~ s/"/\\"/go;
    $temptmp =~ s/^[.]?(.*?)[.]?$/$1/o;
@@ -263,6 +295,7 @@ sub printusage {
    print "\t\ti = analyze IP address, alias for 4 digit matching, does not have sanity check\n";
    print "\t\tt = analyze as ASCII text until first non-printable character, \"1 t\" is quite close to \"a\"\n";
    print "\t\t[number] = copy [number] OID digits\n";
+   print "\t\t-[option] = Start OID analyzing from the right for the command\n";
    print "\t\t\tPrevious advanced snmp discovery script had functionality like this\n";
    print "\nReturn value via STDOUT is JSON array of objects\n";
    print "\t{#TSICSNMPOID} = all OID index which are analyzed by commands\n";
