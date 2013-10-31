@@ -181,7 +181,7 @@ foreach my $snmpwalk_line (`$SNMPWALK $global_snmpwalk_options $CMDSNMPWALK $CMD
       } elsif ($cmd =~ /^\-\d+/o) { # count exact numbers from right
          # create array comb and store OID bytes there for easy join
          my @comb;
-         print STDERR "Negative match $cmd\n";
+         #print STDERR "Negative match $cmd\n";
          for (my $oi=0; $oi < abs($cmd); $oi++) {
             unshift @comb,pop @oid_arr if $oid_arr[0] ne "";
          }
