@@ -62,6 +62,19 @@ Running in Zabbix low level discovery
 my $global_snmpwalk_options = "-OQn";
 my $SNMPWALK = "/usr/bin/snmpwalk";
 
+# Debug print command line
+open(D, ">> /tmp/tsicsnmp.discovery.commandline.log");
+print D gmtime(time) . " $0 ";
+foreach my $l (@ARGV) {
+   if ($l =~ /\s/o) {
+      print D "\"$l\" ";
+   } else {
+      print D "$l ";
+   }
+}
+print D "\n";
+close(D);
+
 # check amount of command line parameters
 if (scalar(@ARGV) < 4) {
    printusage();
@@ -233,14 +246,18 @@ foreach my $analyzed_oid (sort keys %INDEXES) {
    
    # print OIDS in command order, initilize counter to 1 for this master oid
    my $ctr=1;
+   my @output=();
    foreach my $aoid (@{$INDEXES{$analyzed_oid}{a}}) { # go through command analyzed array
-      print "\t\t\t\"{#TSICSNMPINDEX$ctr}\": \"$aoid\",\n";
+      push @output,"\t\t\t\"{#TSICSNMPINDEX$ctr}\": \"$aoid\"";
       # check command code via index and determine ascii printing mode according to result
-      print "\t\t\t\"{#TSICSNMPINDEXTEXT$ctr}\": \"". asciioid($aoid, $CMD_ARRAY[$ctr-1] eq 'a'?0:1) ."\",\n";
+      push @output, "\t\t\t\"{#TSICSNMPINDEXTEXT$ctr}\": \"". asciioid($aoid, $CMD_ARRAY[$ctr-1] eq 'a'?0:1) ."\"";
       
       # increase counter
       $ctr++;
    }
+   
+   print join(",\n", @output) . "\n";
+   
    # close JSON object
    print "\t\t}";
 }
