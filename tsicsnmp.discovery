@@ -60,20 +60,20 @@ Running in Zabbix low level discovery
 
 # global options
 my $global_snmpwalk_options = "-OQn";
-my $SNMPWALK = "/usr/bin/snmpwalk";
+my $SNMPWALK = "/usr/bin/snmpbulkwalk";
 
 # Debug print command line
-open(D, ">> /tmp/tsicsnmp.discovery.commandline.log");
-print D gmtime(time) . " $0 ";
-foreach my $l (@ARGV) {
-   if ($l =~ /\s/o) {
-      print D "\"$l\" ";
-   } else {
-      print D "$l ";
-   }
-}
-print D "\n";
-close(D);
+#open(D, ">> /tmp/tsicsnmp.discovery.commandline.log");
+#print D gmtime(time) . " $0 ";
+#foreach my $l (@ARGV) {
+#   if ($l =~ /\s/o) {
+#      print D "\"$l\" ";
+#   } else {
+#      print D "$l ";
+#   }
+#}
+#print D "\n";
+#close(D);
 
 # check amount of command line parameters
 if (scalar(@ARGV) < 4) {
